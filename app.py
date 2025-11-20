@@ -52,9 +52,12 @@ routing_operations = [
 # --- 3. ÇİZELGELEME FONKSİYONU ---
 
 def calculate_total_production_time(quantity, operations, wcs):
-    """Rota adımlarını toplayarak toplam süreyi (saat) ve termin süresini (gün) hesaplar."""
+    """
+    Rota adımlarını hesaplar ve DETAYLI sonuçları döndürür.
+    """
     total_processing_time_hr = 0
-    total_calendar_time_hr = 0 
+    total_calendar_time_hr = 0
+    detailed_schedule = [] # Yeni: Her operasyonun süresini tutacak liste
 
     operations.sort(key=lambda op: op.seq)
 
@@ -64,36 +67,42 @@ def calculate_total_production_time(quantity, operations, wcs):
             continue
         
         setup_time_hr = op.duration_min / 60 
+        processing_time_hr = 0
+        effective_speed = 0
 
         if op.unit_per_hour > 0:
-            # Etkili Hız = Birim/Saat * Makine Çarpanı * Personel Sayısı (QC'de personel önemli)
             effective_speed = op.unit_per_hour * wc.capacity_multiplier * wc.personnel_count
-            
-            # İşlem Süresi = Toplam Adet / Etkili Hız
             processing_time_hr = quantity / effective_speed
-        else:
-            # Sabit süreli operasyonlar (CNC Setup)
-            processing_time_hr = 0
         
         op_total_time_hr = setup_time_hr + processing_time_hr
-        total_processing_time_hr += op_total_time_hr
+        
+        # Yeni: Detaylı Rota Verisi Ekleme
+        detailed_schedule.append({
+            "seq": op.seq,
+            "description": op.description,
+            "wc_id": op.wc_id,
+            "time_hr": round(op_total_time_hr, 2),
+            "wait_hr": op.wait_time_hr
+        })
 
-        # Takvim süresi: İşlem Süresi + Bekleme Süresi
+        total_processing_time_hr += op_total_time_hr
         total_calendar_time_hr += op_total_time_hr + op.wait_time_hr
 
     total_days = total_calendar_time_hr / WORKING_HOURS_PER_DAY
     
     return {
         "processing_time_hr": round(total_processing_time_hr, 2),
-        "calendar_time_days": round(total_days, 2)
+        "calendar_time_days": round(total_days, 2),
+        "schedule_details": detailed_schedule # Burası Darboğaz Analizi için kritik!
     }
 
-# --- 4. FLASK API BAĞLANTISI ---
+# --- FLASK API BAĞLANTISI (Güncelleme) ---
 
 @app.route('/')
 def home():
-    """Ana API noktası: ERP Çizelgeleme sonucunu gösterir."""
-    # Hesaplamayı çağır
+    """
+    Ana API noktası: ERP Çizelgeleme sonucunu gösterir.
+    """
     results = calculate_total_production_time(TARGET_QUANTITY, routing_operations, work_centers)
     
     return jsonify({
@@ -102,9 +111,9 @@ def home():
         "Calculated_Time": {
             "Total_Work_Hours": results['processing_time_hr'],
             "Calendar_Days": results['calendar_time_days'],
-            "Note": f"9.70 günden {results['calendar_time_days']} güne düştü (QC hızlandırması ve HF çarpanı ile)"
+            "Note": "Verimlilik artışının sebebi HF (4x) ve QC (2x) kapasite kararlarıdır."
         },
-        "message": "Bu sonuçlar, ERP Dashboard'unuza aktarılmaya hazırdır."
+        "Schedule_Details": results['schedule_details'] # Yeni Alan
     })
     
 if __name__ == '__main__':
